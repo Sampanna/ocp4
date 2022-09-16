@@ -1,0 +1,82 @@
+name: latest_tag
+on:
+  schedule:
+    # Runs at 9:00 UTC every day
+    - cron: '0 9 * * *'
+  push:
+    branches:
+      - "new_world"
+env:
+  REGISTRY_USER: ${{ github.actor }}
+  REGISTRY_PASSWORD: ${{ github.token }}
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build_latest_tag:
+    name: ${{ matrix.build.name }}
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        install_latest: [ true ]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: "new_world"
+      - name: Log in to ghcr.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+      - run: |
+          sudo apt-get update
+          sudo apt-get -y install buildah
+        name: 'install deps'
+      - name: Sets env vars
+        run: |
+          release_tag_redirect=$(curl -s https://github.com/curl/curl/releases/latest -w'%{redirect_url}\n' -o /dev/null)
+          latest_release_ref=$(basename ${release_tag_redirect})
+          echo "TAG_REF=$latest_release_ref" >> $GITHUB_ENV
+          rel=${latest_release_ref:5}
+          release_image_tag="${rel//_/.}"
+          echo "REL=$release_image_tag" >> $GITHUB_ENV
+      - run: make branch_or_ref=$TAG_REF release_tag=$REL build_ref_images
+        name: 'build images'
+      - run: make release_tag=$REL test
+        name: 'test image'
+      - run: make release_tag=$REL scan
+        name: 'security scan image'
+      - run: |
+          buildah tag localhost/curl-dev:$REL ghcr.io/curl/curl-docker/curl-dev:$REL
+          buildah push ghcr.io/curl/curl-docker/curl-dev:$REL
+          buildah tag localhost/curl-base:$REL ghcr.io/curl/curl-docker/curl-base:$REL
+          buildah push ghcr.io/curl/curl-docker/curl-base:$REL
+          buildah tag localhost/curl:$REL ghcr.io/curl/curl-docker/curl:$REL
+          buildah push ghcr.io/curl/curl-docker/curl:$REL
+          buildah tag ghcr.io/curl/curl-docker/curl:$REL ghcr.io/curl/curl-docker/curl:latest
+          buildah push ghcr.io/curl/curl-docker/curl:latest
+        name: 'push images'
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@main
+      - name: Sign image with a key
+        run: |
+          cosign sign --key env://COSIGN_PRIVATE_KEY ghcr.io/curl/curl-docker/curl-base:$REL
+          cosign sign --key env://COSIGN_PRIVATE_KEY ghcr.io/curl/curl-docker/curl:$REL
+          cosign sign --key env://COSIGN_PRIVATE_KEY ghcr.io/curl/curl-docker/curl:latest
+        env:
+          COSIGN_PRIVATE_KEY: ${{secrets.COSIGN_PRIVATE_KEY}}
+          COSIGN_PASSWORD: ${{secrets.COSIGN_PASSWORD}}
+      - name: Verify image
+        run: |
+          cosign verify --key cosign.pub ghcr.io/curl/curl-docker/curl-base:$REL
+          cosign verify --key cosign.pub ghcr.io/curl/curl-docker/curl:$REL
+          cosign verify --key cosign.pub ghcr.io/curl/curl-docker/curl:latest
+        env:
+          COSIGN_PUBLIC_KEY: ${{secrets.COSIGN_PUBLIC_KEY}}
+
+

@@ -1,0 +1,95 @@
+name: master
+on:
+  schedule:
+    # Runs every hour
+    - cron: '0 * * * * '
+  push:
+    branches:
+      - "new_world"
+env:
+  REGISTRY_USER: ${{ github.actor }}
+  REGISTRY_PASSWORD: ${{ github.token }}
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build_master:
+    name: ${{ matrix.build.name }}
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        install_latest: [ true ]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: "new_world"
+      - name: Log in to ghcr.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+      - run: |
+          sudo apt-get update
+          sudo apt-get -y install buildah
+        name: 'install deps'
+      - run: make branch_or_ref=master release_tag=master build_ref_images
+        name: 'build master images'
+      - run: make release_tag=master test
+        name: 'test image'
+      - run: make release_tag=master scan
+        name: 'security scan image'
+      - run: |
+          buildah tag localhost/curl-dev:master ghcr.io/curl/curl-docker/curl-dev:master
+          buildah push ghcr.io/curl/curl-docker/curl-dev:master
+          buildah tag localhost/curl-base:master ghcr.io/curl/curl-docker/curl-base:master
+          buildah push ghcr.io/curl/curl-docker/curl-base:master
+          buildah tag localhost/curl:master ghcr.io/curl/curl-docker/curl:master
+          buildah push ghcr.io/curl/curl-docker/curl:master
+        name: 'push images'
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@main
+      - name: Sign image with a key
+        run: |
+          cosign sign --key env://COSIGN_PRIVATE_KEY ghcr.io/curl/curl-docker/curl-base:master
+          cosign sign --key env://COSIGN_PRIVATE_KEY ghcr.io/curl/curl-docker/curl:master
+        env:
+          COSIGN_PRIVATE_KEY: ${{secrets.COSIGN_PRIVATE_KEY}}
+          COSIGN_PASSWORD: ${{secrets.COSIGN_PASSWORD}}
+      - name: Verify image
+        run: |
+          cosign verify --key cosign.pub ghcr.io/curl/curl-docker/curl-base:master
+          cosign verify --key cosign.pub ghcr.io/curl/curl-docker/curl:master
+        env:
+          COSIGN_PUBLIC_KEY: ${{secrets.COSIGN_PUBLIC_KEY}}
+#      - name: "login docker hub"
+#        run: |
+#          podman login -u ${{secrets.DOCKER_HUB_USER}} -p ${{secrets.DOCKER_HUB_TOKEN}} docker.io
+#          docker login -u ${{secrets.DOCKER_HUB_USER}} -p ${{secrets.DOCKER_HUB_TOKEN}}
+#      - name: 'push docker hub'
+#        run: |
+#          buildah tag ghcr.io/curl/curl-docker/curl-dev:master docker.io/curlimages/curl-dev:master
+#          buildah push docker.io/curlimages/curl-dev:master
+#          buildah tag ghcr.io/curl/curl-docker/curl-base:master docker.io/curlimages/curl-base:master
+#          buildah push docker.io/curlimages/curl-base:master
+#          buildah tag ghcr.io/curl/curl-docker/curl:master docker.io/curlimages/curl:master
+#          buildah push docker.io/curlimages/curl:master
+#      - name: Sign image with a key
+#        run: |
+#          cosign sign --key env://COSIGN_PRIVATE_KEY docker.io/curlimages/curl-dev:master
+#          cosign sign --key env://COSIGN_PRIVATE_KEY docker.io/curlimages/curl-base:master
+#          cosign sign --key env://COSIGN_PRIVATE_KEY docker.io/curlimages/curl:master
+#        env:
+#          COSIGN_PRIVATE_KEY: ${{secrets.COSIGN_PRIVATE_KEY}}
+#          COSIGN_PASSWORD: ${{secrets.COSIGN_PASSWORD}}
+#      - name: Verify image
+#        run: |
+#          cosign verify --key cosign.pub docker.io/curlimages/curl:master
+#        env:
+#          COSIGN_PUBLIC_KEY: ${{secrets.COSIGN_PUBLIC_KEY}}
+      - run: make branch_or_ref=master release_tag=master multibuild
+        name: 'build multibuild'
