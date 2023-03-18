@@ -63,5 +63,4 @@ $ make lint
     * Daniel Stenberg 
     * Max Dymond
     * Olliver Schinagl
-      
 
