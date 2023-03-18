@@ -1,4 +1,4 @@
-# Curl Docker Images repository
+# Curl Docker Images repository. 
 
 This repository defines the official curl docker image.
 
@@ -14,7 +14,7 @@ __note__ - requires latest docker to be installed and available
 If you have problems, questions, ideas or suggestions, please contact [curl-docker team](curl-docker@haxx.se)
 or [Jim Fuller](jim.fuller@webcomposite.com) directly.
 
-## Using Images
+## Using Images.
 
 ### get docker image
 
